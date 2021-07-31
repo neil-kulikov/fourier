@@ -86,18 +86,18 @@ void density_fourier_naive(const density_fourier_params<Float>& params) {
 #include <immintrin.h>
 #include <algorithm>
 
-inline float _mm128_hsum_ps(__m128 v) {
-    __m128 shuf = _mm_movehdup_ps(v);
-    __m128 sums = _mm_add_ps(v, shuf);
-    shuf        = _mm_movehl_ps(shuf, sums);
-    sums        = _mm_add_ss(sums, shuf);
-    return        _mm_cvtss_f32(sums);
+inline float _mm128_hsum_ps(__m128 varg) {
+    __m128 vshuf = _mm_movehdup_ps(varg);
+    __m128 vsums = _mm_add_ps(varg, vshuf);
+    vshuf = _mm_movehl_ps(vshuf, vsums);
+    vsums = _mm_add_ss(vsums, vshuf);
+    return _mm_cvtss_f32(vsums);
 }
 
-inline float _mm256_hsum_ps(__m256 v) {
-    __m128 vlow  = _mm256_castps256_ps128(v);
-    __m128 vhigh = _mm256_extractf128_ps(v, 1);
-           vlow  = _mm_add_ps(vlow, vhigh);
+inline float _mm256_hsum_ps(__m256 varg) {
+    __m128 vlow  = _mm256_castps256_ps128(varg);
+    __m128 vhigh = _mm256_extractf128_ps(varg, 1);
+    vlow  = _mm_add_ps(vlow, vhigh);
     return _mm128_hsum_ps(vlow);
 }
 
