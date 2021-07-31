@@ -63,14 +63,12 @@ inline void handle_sample(const Float& sample,
     }
 }
 
+
 template<typename Float, long dblock = 512, long hblock = 32> 
-void density_fourier(const density_fourier_params<Float>& params) {
+void density_fourier_naive(const density_fourier_params<Float>& params) {
     long s = 0;
-    //PREFETCH((params.reharmonics), 1, 3);
-    //PREFETCH((params.imharmonics), 1, 3);
     for(; (s + dblock) < params.scount; s += dblock) {
-        //PREFETCH((params.samples + s), 0, 2);
-        //PREFETCH((params.samples + s + dblock), 0, 1);
+        #pragma unroll
         for(long i = 0; i < dblock; ++i) {
             const long isamp = s + i;
             const auto& sample = params.samples[isamp];
@@ -82,6 +80,95 @@ void density_fourier(const density_fourier_params<Float>& params) {
         handle_sample<Float, hblock>(sample, params);
     }
 }
+
+#ifdef __AVX__
+
+#include <immintrin.h>
+#include <algorithm>
+
+inline float hsum_ps_sse3(__m128 v) {
+    __m128 shuf = _mm_movehdup_ps(v);
+    __m128 sums = _mm_add_ps(v, shuf);
+    shuf        = _mm_movehl_ps(shuf, sums);
+    sums        = _mm_add_ss(sums, shuf);
+    return        _mm_cvtss_f32(sums);
+}
+
+inline float hsum256_ps_avx(__m256 v) {
+    __m128 vlow  = _mm256_castps256_ps128(v);
+    __m128 vhigh = _mm256_extractf128_ps(v, 1);
+           vlow  = _mm_add_ps(vlow, vhigh);
+    return hsum_ps_sse3(vlow);
+}
+
+inline void step_avx(const long& h, 
+                     __m256& cre, __m256& cim,
+                     const __m256 cos, const __m256 sin, 
+                     const density_fourier_params<float>& params) {
+    params.reharmonics[h] += hsum256_ps_avx(cre);
+    params.imharmonics[h] += hsum256_ps_avx(cim);
+    const __m256 pre = cre;
+    cre = _mm256_sub_ps(
+                        _mm256_mul_ps(cre, cos), 
+                        _mm256_mul_ps(cim, sin));
+    cim = _mm256_add_ps(
+                        _mm256_mul_ps(pre, sin), 
+                        _mm256_mul_ps(cim, cos));
+}
+
+template<long dblock = 128, long hblock = 32> 
+void density_fourier_avx(const density_fourier_params<float>& params) {
+    constexpr long vec_width = 8;
+    static_assert((dblock % vec_width) == 0);
+    alignas(32) float sins[dblock];
+    alignas(32) float coss[dblock];
+    long s = 0;
+    for(; (s + dblock) < params.scount; s += dblock) {
+        const auto* const from = params.samples + s;
+        #pragma unroll
+        for(long i = 0; i < dblock; ++i) {
+            const float arg = params.basek * (from[i] - params.shift);
+            sins[i] = std::sin(arg);
+            coss[i] = std::cos(arg);
+        }
+        #pragma unroll
+        for(long i = 0; i < dblock; i += vec_width) {
+            const __m256 sin = _mm256_load_ps(sins + i);
+            const __m256 cos = _mm256_load_ps(coss + i);
+            __m256 cre = cos, cim = sin;
+            long h = 1;
+            *(params.reharmonics) += float(vec_width);
+            for(; (h + hblock) < params.hcount; h += hblock) {
+                #pragma unroll
+                for(long j = 0; j < hblock; ++j) {
+                    const long c = h + j;
+                    step_avx(c, cre, cim, cos, sin, params);
+                }
+            }
+            for(; h < params.hcount; ++h) {
+                step_avx(h, cre, cim, cos, sin, params);
+            }
+        }
+    }
+    for(; s < params.scount; ++s) {
+        const auto& sample = params.samples[s];
+        handle_sample<float, hblock>(sample, params);
+    }
+}
+
+#endif
+
+template<typename Float, long dblock = 128, long hblock = 32> 
+void density_fourier(const density_fourier_params<Float>& params) {
+    #ifdef __AVX__
+    if constexpr (std::is_same_v<Float, float>) {
+        density_fourier_avx<dblock, hblock>(params);
+        return;
+    }
+    #endif
+    density_fourier_naive<Float, dblock, hblock>(params);
+}
+
 
 template void density_fourier<float>(const density_fourier_params<float>& params);
 template void density_fourier<double>(const density_fourier_params<double>& params);
