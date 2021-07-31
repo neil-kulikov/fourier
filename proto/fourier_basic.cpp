@@ -86,7 +86,7 @@ void density_fourier_naive(const density_fourier_params<Float>& params) {
 #include <immintrin.h>
 #include <algorithm>
 
-inline float hsum_ps_sse3(__m128 v) {
+inline float _mm128_hsum_ps(__m128 v) {
     __m128 shuf = _mm_movehdup_ps(v);
     __m128 sums = _mm_add_ps(v, shuf);
     shuf        = _mm_movehl_ps(shuf, sums);
@@ -94,19 +94,19 @@ inline float hsum_ps_sse3(__m128 v) {
     return        _mm_cvtss_f32(sums);
 }
 
-inline float hsum256_ps_avx(__m256 v) {
+inline float _mm256_hsum_ps(__m256 v) {
     __m128 vlow  = _mm256_castps256_ps128(v);
     __m128 vhigh = _mm256_extractf128_ps(v, 1);
            vlow  = _mm_add_ps(vlow, vhigh);
-    return hsum_ps_sse3(vlow);
+    return _mm128_hsum_ps(vlow);
 }
 
 inline void step_avx(const long& h, 
                      __m256& cre, __m256& cim,
                      const __m256 cos, const __m256 sin, 
                      const density_fourier_params<float>& params) {
-    params.reharmonics[h] += hsum256_ps_avx(cre);
-    params.imharmonics[h] += hsum256_ps_avx(cim);
+    params.reharmonics[h] += _mm256_hsum_ps(cre);
+    params.imharmonics[h] += _mm256_hsum_ps(cim);
     const __m256 pre = cre;
     cre = _mm256_sub_ps(
                         _mm256_mul_ps(cre, cos), 
